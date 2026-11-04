@@ -11,6 +11,7 @@
     <application
         android:name=".App"
         android:label="浮窗相机"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
 
