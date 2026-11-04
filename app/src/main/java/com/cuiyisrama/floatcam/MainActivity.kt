@@ -138,6 +138,8 @@ class MainActivity : ComponentActivity() {
         try {
             startForegroundService(Intent(this, OverlayService::class.java))
             isServiceRunning = true
+            // 启动后主动重新绑定，确保 binder 非 null（否则滑条/按钮失效）
+            probeService()
         } catch (_: Exception) {
             isServiceRunning = false
         }
