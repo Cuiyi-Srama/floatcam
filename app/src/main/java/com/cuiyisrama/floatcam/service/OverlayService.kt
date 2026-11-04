@@ -36,9 +36,11 @@ class OverlayService : Service(), LifecycleOwner {
         private const val CHANNEL_ID = "floatcam"
         private const val NOTIF_ID = 1
 
-        /** 通知 Action 动作码（PendingIntent requestCode 唯一） */
-        const val ACTION_TOGGLE_EDIT = 1001
-        const val ACTION_STOP = 1002
+        /** 通知 Action（action 用字符串；requestCode 用 Int 且唯一） */
+        const val ACTION_TOGGLE_EDIT = "floatcam.action.TOGGLE_EDIT"
+        const val ACTION_STOP = "floatcam.action.STOP"
+        const val REQ_TOGGLE_EDIT = 1001
+        const val REQ_STOP = 1002
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -164,13 +166,13 @@ class OverlayService : Service(), LifecycleOwner {
 
         // 编辑/锁定切换（getService 直送，不离开当前界面）
         val toggleEdit = PendingIntent.getService(
-            this, ACTION_TOGGLE_EDIT,
+            this, REQ_TOGGLE_EDIT,
             Intent(this, OverlayService::class.java).setAction(ACTION_TOGGLE_EDIT),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         // 退出
         val stop = PendingIntent.getService(
-            this, ACTION_STOP,
+            this, REQ_STOP,
             Intent(this, OverlayService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
