@@ -216,6 +216,14 @@ class OverlayService : Service(), LifecycleOwner {
         windowController.setEditing(enabled)
     }
 
+    /** 当前是否编辑态 */
+    fun isEditing(): Boolean = windowController.editing
+
+    /** 设置摄像头窗口透明度（UI 滑条） */
+    fun setCameraAlpha(alpha: Float) {
+        windowController.setCameraAlpha(alpha)
+    }
+
     override fun onDestroy() {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         cameraController.unbindAll()
