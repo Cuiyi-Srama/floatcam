@@ -30,30 +30,38 @@ class CameraController(
     private var preview: Preview? = null
     private var bound = false
 
+    /** 当前镜头方向：true=前置，false=后置 */
+    var useFrontCamera: Boolean = false
+        private set
+
     private val executor: Executor = ContextCompat.getMainExecutor(context)
 
     /** 当前是否已绑定相机 */
     fun isBound(): Boolean = bound
 
+    /** 当前镜头选择器 */
+    private fun currentSelector(): CameraSelector =
+        if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA
+        else CameraSelector.DEFAULT_BACK_CAMERA
+
     /**
-     * 绑定后置摄像头到 PreviewView。成功后回调 onBound。
+     * 绑定当前镜头到 PreviewView。成功后回调 onBound。
      */
     fun bindToPreviewView(previewView: PreviewView, onBound: (() -> Unit)? = null) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
             try {
                 val provider = providerFuture.get()
-                val selector = CameraSelector.DEFAULT_BACK_CAMERA
                 preview = Preview.Builder().build()
                 preview?.setSurfaceProvider(previewView.surfaceProvider)
 
                 // 先解绑旧的，再绑定（切换镜头/重绑路径）
                 provider.unbindAll()
                 camera = provider.bindToLifecycle(
-                    lifecycleOwner, selector, preview
+                    lifecycleOwner, currentSelector(), preview
                 )
                 bound = true
-                Log.i(TAG, "camera bound")
+                Log.i(TAG, "camera bound, front=$useFrontCamera")
                 onBound?.invoke()
             } catch (e: SecurityException) {
                 Log.e(TAG, "SecurityException (camera permission revoked?)", e)
@@ -64,6 +72,15 @@ class CameraController(
                 bound = false
             }
         }, executor)
+    }
+
+    /**
+     * 切换前后置摄像头（架构文档 6.6：先 unbindAll 再 bindToLifecycle）。
+     */
+    fun switchCamera(previewView: PreviewView, onBound: (() -> Unit)? = null) {
+        useFrontCamera = !useFrontCamera
+        unbindAll()
+        bindToPreviewView(previewView, onBound)
     }
 
     /**
