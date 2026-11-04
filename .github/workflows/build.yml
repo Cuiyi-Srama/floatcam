@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -17,8 +20,9 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android licenses
+        run: |
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
       - name: Build step0 APK
         uses: gradle/gradle-build-action@v3
@@ -31,4 +35,3 @@ jobs:
         with:
           name: step0-apk
           path: step0/build/outputs/apk/release/*.apk
-# v2: re-register workflow
