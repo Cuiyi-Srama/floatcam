@@ -12,6 +12,19 @@ class OverlayBinder(
     /** 当前是否持有相机（决定 FGS 类型 camera vs specialUse） */
     fun isCameraActive(): Boolean = service.isCameraActive()
 
+    /** 当前是否编辑态 */
+    fun isEditing(): Boolean = service.isEditing()
+
+    /** 切换编辑/锁定态 */
+    fun setEditing(enabled: Boolean) {
+        service.setEditing(enabled)
+    }
+
+    /** 设置摄像头窗口透明度 */
+    fun setCameraAlpha(alpha: Float) {
+        service.setCameraAlpha(alpha)
+    }
+
     fun updateFoldingState(state: Any?) {
         service.updateFoldingState(state)
     }
