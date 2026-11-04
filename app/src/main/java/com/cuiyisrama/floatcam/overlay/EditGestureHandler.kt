@@ -36,7 +36,6 @@ class EditGestureHandler(
 
     // 缩放状态
     private var lastSpan = 0f
-    private var currentScale = 1f
     private var scaling = false
 
     override fun onTouch(v: View, event: MotionEvent): Boolean {
@@ -58,7 +57,7 @@ class EditGestureHandler(
                     dragging = false
                     scaling = true
                     lastSpan = spacing(event)
-                    currentScale = 1f
+                    onResize(1f) // 通知 controller 记录手势起始基准尺寸
                 }
                 return true
             }
@@ -66,13 +65,11 @@ class EditGestureHandler(
             MotionEvent.ACTION_MOVE -> {
                 if (scaling && event.pointerCount >= 2) {
                     val span = spacing(event)
-                    val delta = span - lastSpan
-                    if (span > 0 && lastSpan > 0 && kotlin.math.abs(delta) > MIN_DISTANCE_PX) {
-                        val scale = (delta / lastSpan).coerceIn(-0.05f, 0.05f)
-                        currentScale = (currentScale + scale).coerceIn(SCALE_MIN, SCALE_MAX)
-                        onResize(currentScale)
+                    if (span > 0 && lastSpan > 0) {
+                        // 平滑因子：当前跨度 / 起始跨度（相对起始的倍率）
+                        val scale = span / lastSpan
+                        onResize(scale.coerceIn(SCALE_MIN, SCALE_MAX))
                     }
-                    lastSpan = span
                     return true
                 }
                 if (!scaling) {
