@@ -61,7 +61,7 @@ class OverlayWindowController(
             gravity = Gravity.TOP or Gravity.START
             x = 60
             y = 200
-            alpha = 0.7f
+            alpha = 0.54f
         }
         cameraParams = params
 
