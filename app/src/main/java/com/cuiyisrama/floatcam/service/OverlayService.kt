@@ -5,13 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.camera.view.PreviewView
+import androidx.lifecycle.LifecycleService
 import com.cuiyisrama.floatcam.MainActivity
+import com.cuiyisrama.floatcam.camera.CameraController
+import com.cuiyisrama.floatcam.overlay.OverlayWindowController
 
 /**
  * 前台服务，持有运行时唯一状态源（对应架构文档 6.3 动态类型切换）。
@@ -21,7 +24,7 @@ import com.cuiyisrama.floatcam.MainActivity
  * - 摄像头窗口隐藏、相机已 unbind、水印可见 → specialUse（重新 startForeground 切换）
  * - 双窗口均不可见 → 停止服务
  */
-class OverlayService : Service() {
+class OverlayService : LifecycleService() {
 
     companion object {
         private const val TAG = "FloatCam"
@@ -33,10 +36,19 @@ class OverlayService : Service() {
     private var cameraActive = false
     private var watermarkVisible = false
 
+    private lateinit var windowController: OverlayWindowController
+    private lateinit var cameraController: CameraController
+    private var previewView: PreviewView? = null
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         startForegroundCompat()
+
+        windowController = OverlayWindowController(this)
+        cameraController = CameraController(this, this)
+
+        buildCameraWindow()
         Log.i(TAG, "OverlayService created")
     }
 
@@ -49,6 +61,25 @@ class OverlayService : Service() {
         val b = OverlayBinder(this)
         binder = b
         return b
+    }
+
+    /** 构建摄像头悬浮窗并绑定相机（架构文档 6.2 第 4 步） */
+    private fun buildCameraWindow() {
+        val view = PreviewView(this).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+        previewView = view
+
+        val added = windowController.addCameraWindow(view)
+        if (!added) {
+            Log.e(TAG, "camera window add failed -> controlled stop")
+            stopSelf()
+            return
+        }
+        // 窗口添加成功后才绑定相机，避免人为拉长 while-in-use 窗口期
+        cameraController.bindToPreviewView(view) {
+            onCameraStateChanged(true)
+        }
     }
 
     /** 有相机 → camera 类型；仅水印 → specialUse 类型 */
@@ -123,7 +154,7 @@ class OverlayService : Service() {
         // TODO(批次 9): FoldingFeature 保守夹取，与 Insets 机制分离
     }
 
-    /** 相机开关（批次 4 起由 CameraController 调用） */
+    /** 相机开关（CameraController 回调） */
     fun onCameraStateChanged(active: Boolean) {
         if (cameraActive == active) return
         cameraActive = active
@@ -131,6 +162,8 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        cameraController.unbindAll()
+        windowController.removeAll()
         Log.i(TAG, "OverlayService destroyed")
         super.onDestroy()
     }
