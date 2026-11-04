@@ -1,20 +1,62 @@
 # FloatCam 浮窗相机
 
-悬浮摄像头与水印图层。摄像头和水印是两个独立 WindowManager 窗口，可并行、分别开关。
+悬浮摄像头与水印图层 —— 游戏直播/录屏场景的摄像头悬浮窗工具。
 
-- 包名：`com.cuiyisrama.floatcam`（正式）
-- 目标机：vivo V2425A / Android 17 (SDK 37)
-- 编译链路：GitHub Actions 云端编译
+摄像头与水印是两个**独立 WindowManager 窗口**，可并行、分别开关。App 只负责在屏幕上显示可配置的悬浮窗，推流、编码、屏幕捕获交给直播软件，直播软件通过系统屏幕捕获自然读到本 App 的悬浮窗。
+
+## 功能特性
+
+- 📷 **摄像头悬浮窗**：CameraX 预览，悬浮在任意应用之上
+- 🖼️ **水印悬浮窗**：透明 PNG 水印图层，独立窗口独立开关
+- 🎚️ **独立控制**：摄像头、水印可分别开/关，互不联动
+- ✋ **两态运行**：编辑态（拖动/缩放/调透明度）+ 锁定态（穿透，实测为准）
+- 🔄 **动态前台服务类型**：有相机用 `camera`，仅水印切 `specialUse`（API 34+），双隐停止
+- 🔒 **隐私安全**：不设 FLAG_SECURE、不申请 MediaProjection、不依赖无障碍、不静默自启
+
+## 技术栈
+
+| 领域 | 选型 |
+| --- | --- |
+| UI | 单 Activity + Jetpack Compose |
+| 相机 | CameraX + PreviewView |
+| 服务 | LifecycleService + 前台服务（动态类型 camera \| specialUse） |
+| 持久化 | DataStore（Preferences，800ms 防抖 + 5s 最大防抖窗口） |
+| 图片选择 | Photo Picker（PickVisualMedia，API 26 回退） |
+| 窗口 | WindowManager + TYPE_APPLICATION_OVERLAY |
+| 最低版本 | API 26 |
+
+## 构建
+
+```bash
+./gradlew :app:assembleRelease
+```
+
+产物：`app/build/outputs/apk/release/`。CI 通过 GitHub Actions 自动编译，Artifact 见 Actions 页面。
 
 ## 目录结构
 
-- `step0/` — Step 0 验证探针（纯 Java，包名 `com.cuiyisrama.step0probe`），用于实测不可信触摸阻断、FGS 类型切换、锁屏恢复等前置验证。测完即弃，不进入正式工程。
+```
+app/                        # 正式工程（Kotlin + Compose）
+  src/main/java/com/cuiyisrama/floatcam/
+    MainActivity.kt         # 服务探测、权限、Compose 首页
+    service/                # OverlayService + OverlayBinder（唯一状态源）
+step0/                      # Step 0 验证探针（纯 Java，测完即弃）
+```
 
-## Step 0 验证 APK
+## 版本
 
-构建：`./gradlew :step0:assembleRelease`
-产物：`step0/build/outputs/apk/release/`
+- v0.1.0：正式工程骨架（Compose 首页 + 前台服务动态类型切换 + 权限链路），CI 编译通过
+- Step 0 验证（探针）：在目标 ROM 实测不可信触摸阻断、FGS 类型切换、锁屏恢复，结论决定后续功能验收标准
 
-功能：悬浮窗显示 Camera2 后置预览，MainActivity 内可循环切换窗口 alpha（1.0 / 0.8 / 0.75 / 0.7），用于在目标 ROM 上实测后台场景下高不透明度的触摸阻断行为。
+## 目标设备
 
-架构蓝图见 `/sdcard/Download/Operit/cleanOnExit/pasted_text_9219963240600061490.txt`（第 1 版，含已确认的 6.3 动态类型切换、G 组 specialUse 存活验证等修改）。
+- 主目标机：vivo V2425A / Android 17 (SDK 37)
+- 兼容：Android 12+（不可信触摸机制），API 26+ 可安装
+
+## 许可
+
+MIT License
+
+---
+
+架构蓝图与 Step 0 实测矩阵见项目文档（`docs/` 规划中）。
