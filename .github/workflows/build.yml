@@ -24,13 +24,25 @@ jobs:
         run: |
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
+      - name: Build app APK
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: '8.7'
+          arguments: :app:assembleRelease --no-daemon
+
+      - name: Upload app APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: floatcam-app
+          path: app/build/outputs/apk/release/*.apk
+
       - name: Build step0 APK
         uses: gradle/gradle-build-action@v3
         with:
-          gradle-version: '8.5'
+          gradle-version: '8.7'
           arguments: :step0:assembleRelease --no-daemon
 
-      - name: Upload APK artifact
+      - name: Upload step0 APK
         uses: actions/upload-artifact@v4
         with:
           name: step0-apk
