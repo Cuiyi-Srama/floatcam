@@ -11,7 +11,9 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.camera.view.PreviewView
-import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import com.cuiyisrama.floatcam.MainActivity
 import com.cuiyisrama.floatcam.camera.CameraController
 import com.cuiyisrama.floatcam.overlay.OverlayWindowController
@@ -19,18 +21,26 @@ import com.cuiyisrama.floatcam.overlay.OverlayWindowController
 /**
  * 前台服务，持有运行时唯一状态源（对应架构文档 6.3 动态类型切换）。
  *
+ * 注意：不继承 LifecycleService——其 onBind 返回 void（内部拦截 Binder）。
+ * 改为 Service + 手动实现 LifecycleOwner，供 CameraX bindToLifecycle 使用。
+ *
  * FGS 类型策略：
  * - 摄像头窗口可见、相机绑定中 → camera
  * - 摄像头窗口隐藏、相机已 unbind、水印可见 → specialUse（重新 startForeground 切换）
  * - 双窗口均不可见 → 停止服务
  */
-class OverlayService : LifecycleService() {
+class OverlayService : Service(), LifecycleOwner {
 
     companion object {
         private const val TAG = "FloatCam"
         private const val CHANNEL_ID = "floatcam"
         private const val NOTIF_ID = 1
     }
+
+    private val lifecycleRegistry = LifecycleRegistry(this)
+
+    override val lifecycle: Lifecycle
+        get() = lifecycleRegistry
 
     private var binder: OverlayBinder? = null
     private var cameraActive = false
@@ -42,6 +52,10 @@ class OverlayService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+
         createNotificationChannel()
         startForegroundCompat()
 
@@ -162,6 +176,7 @@ class OverlayService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         cameraController.unbindAll()
         windowController.removeAll()
         Log.i(TAG, "OverlayService destroyed")
