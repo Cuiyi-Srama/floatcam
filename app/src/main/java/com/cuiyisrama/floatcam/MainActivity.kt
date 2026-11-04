@@ -14,39 +14,45 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.cuiyisrama.floatcam.service.OverlayService
 import com.cuiyisrama.floatcam.service.OverlayBinder
-import kotlinx.coroutines.runBlocking
+import com.cuiyisrama.floatcam.service.OverlayService
 
 class MainActivity : ComponentActivity() {
 
     private var bound = false
     private var binder: OverlayBinder? = null
     private var isServiceRunning by mutableStateOf(false)
+    private var isEditing by mutableStateOf(true)
+    private var cameraAlpha by mutableFloatStateOf(0.7f)
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             binder = service as? OverlayBinder
             bound = true
             isServiceRunning = true
+            // 读取当前状态
+            isEditing = binder?.isEditing() ?: true
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -63,8 +69,12 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     MainScreen(
                         isRunning = isServiceRunning,
+                        isEditing = isEditing,
+                        cameraAlpha = cameraAlpha,
                         onStart = { startOverlay() },
-                        onStop = { stopOverlay() }
+                        onStop = { stopOverlay() },
+                        onToggleEdit = { toggleEdit() },
+                        onAlphaChange = { setAlpha(it) }
                     )
                 }
             }
@@ -84,28 +94,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 探测服务是否存活：不带 BIND_AUTO_CREATE（flags=0），避免误启动服务；加短超时判定 */
+    /** 探测服务是否存活：不带 BIND_AUTO_CREATE（flags=0），避免误启动服务 */
     private fun probeService() {
         try {
             val ok = bindService(
                 Intent(this, OverlayService::class.java),
                 connection,
-                0  // 不带 BIND_AUTO_CREATE：服务未运行时不会创建，bind 立即失败
+                0  // 不带 BIND_AUTO_CREATE：服务未运行时不会创建
             )
             if (!ok) {
-                // bindService 返回 false = 服务不存在
                 isServiceRunning = false
                 return
             }
-            // 已绑定成功（服务在跑）→ 状态由 onServiceConnected 更新
-            // 若服务不在，系统会回调 onServiceDisconnected（对未创建服务，bind 本身返回 false）
         } catch (_: Exception) {
             isServiceRunning = false
         }
     }
 
     private fun startOverlay() {
-        // 权限前置
+        // 权限前置（三关顺序检查链）
         if (!Settings.canDrawOverlays(this)) {
             startActivity(
                 Intent(
@@ -128,7 +135,6 @@ class MainActivity : ComponentActivity() {
             startForegroundService(Intent(this, OverlayService::class.java))
             isServiceRunning = true
         } catch (_: Exception) {
-            // ForegroundServiceStartNotAllowedException 等：进入可控停止
             isServiceRunning = false
         }
     }
@@ -136,6 +142,20 @@ class MainActivity : ComponentActivity() {
     private fun stopOverlay() {
         stopService(Intent(this, OverlayService::class.java))
         isServiceRunning = false
+    }
+
+    /** 编辑/锁定切换（App 内控制，不依赖悬浮球） */
+    private fun toggleEdit() {
+        val b = binder ?: return
+        val next = !isEditing
+        b.setEditing(next)
+        isEditing = next
+    }
+
+    /** 透明度滑条（App 内控制） */
+    private fun setAlpha(value: Float) {
+        cameraAlpha = value
+        binder?.setCameraAlpha(value)
     }
 
     override fun onRequestPermissionsResult(
@@ -153,8 +173,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MainScreen(
     isRunning: Boolean,
+    isEditing: Boolean,
+    cameraAlpha: Float,
     onStart: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onToggleEdit: () -> Unit,
+    onAlphaChange: (Float) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -173,7 +197,30 @@ private fun MainScreen(
         Button(onClick = if (isRunning) onStop else onStart) {
             Text(if (isRunning) "停止服务" else "启动服务")
         }
-        Spacer(modifier = Modifier.height(12.dp))
+
+        // 服务运行时的控制面板（App 内控制，无悬浮球）
+        if (isRunning) {
+            Spacer(modifier = Modifier.height(32.dp))
+            Text(text = "窗口控制", fontSize = 16.sp)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(onClick = onToggleEdit) {
+                Text(if (isEditing) "锁定（穿透）" else "编辑（可拖动）")
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(text = "透明度: ${"%.2f".format(cameraAlpha)}", fontSize = 14.sp)
+            Slider(
+                value = cameraAlpha,
+                onValueChange = onAlphaChange,
+                valueRange = 0.3f..1.0f,
+                modifier = Modifier.width(260.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = "提示：低透明度更可能穿透，但画面更淡", fontSize = 12.sp)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
         Text(text = "悬浮摄像头与水印图层", fontSize = 12.sp)
     }
 }
