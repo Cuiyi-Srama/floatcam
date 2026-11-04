@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
     private var binder: OverlayBinder? = null
     private var isServiceRunning by mutableStateOf(false)
     private var isEditing by mutableStateOf(true)
-    private var cameraAlpha by mutableFloatStateOf(0.7f)
+    private var cameraAlpha by mutableFloatStateOf(0.54f)
     private var isFrontCamera by mutableStateOf(false)
 
     private val connection = object : ServiceConnection {
