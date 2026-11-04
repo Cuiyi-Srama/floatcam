@@ -13,4 +13,5 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "floatcam"
+include ':app'
 include ':step0'
