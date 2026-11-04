@@ -35,6 +35,10 @@ class OverlayService : Service(), LifecycleOwner {
         private const val TAG = "FloatCam"
         private const val CHANNEL_ID = "floatcam"
         private const val NOTIF_ID = 1
+
+        /** 通知 Action 动作码（PendingIntent requestCode 唯一） */
+        const val ACTION_TOGGLE_EDIT = 1001
+        const val ACTION_STOP = 1002
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -56,18 +60,30 @@ class OverlayService : Service(), LifecycleOwner {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
-        createNotificationChannel()
-        startForegroundCompat()
-
         windowController = OverlayWindowController(this)
         cameraController = CameraController(this, this)
+
+        createNotificationChannel()
+        startForegroundCompat()
 
         buildCameraWindow()
         Log.i(TAG, "OverlayService created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // TODO(批次 2+): 处理通知 Action 与生命周期事件（SCREEN_OFF/ON、onTaskRemoved）
+        // 通知 Action 直送（服务存活时 getService；未初始化时普通 Action 忽略，架构文档 9）
+        if (intent != null) {
+            when (intent.action) {
+                ACTION_TOGGLE_EDIT -> {
+                    setEditing(!windowController.editing)
+                    // 刷新通知文本
+                    startForegroundCompat()
+                }
+                ACTION_STOP -> {
+                    stopSelf()
+                }
+            }
+        }
         return START_NOT_STICKY
     }
 
@@ -145,12 +161,30 @@ class OverlayService : Service(), LifecycleOwner {
             this, 0, launch,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+
+        // 编辑/锁定切换（getService 直送，不离开当前界面）
+        val toggleEdit = PendingIntent.getService(
+            this, ACTION_TOGGLE_EDIT,
+            Intent(this, OverlayService::class.java).setAction(ACTION_TOGGLE_EDIT),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        // 退出
+        val stop = PendingIntent.getService(
+            this, ACTION_STOP,
+            Intent(this, OverlayService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val label = if (windowController.editing) "锁定" else "编辑"
+
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("浮窗相机")
             .setContentText(if (cameraActive) "摄像头悬浮窗运行中" else "水印悬浮窗运行中")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentIntent(pi)
             .setOngoing(true)
+            .addAction(0, label, toggleEdit)
+            .addAction(0, "退出", stop)
             .build()
     }
 
@@ -173,6 +207,11 @@ class OverlayService : Service(), LifecycleOwner {
         if (cameraActive == active) return
         cameraActive = active
         refreshForegroundType()
+    }
+
+    /** 切换编辑/锁定态（通知 Action / UI 调用） */
+    fun setEditing(enabled: Boolean) {
+        windowController.setEditing(enabled)
     }
 
     override fun onDestroy() {
