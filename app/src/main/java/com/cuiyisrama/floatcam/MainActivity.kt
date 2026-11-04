@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private var isServiceRunning by mutableStateOf(false)
     private var isEditing by mutableStateOf(true)
     private var cameraAlpha by mutableFloatStateOf(0.7f)
+    private var isFrontCamera by mutableStateOf(false)
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
             isServiceRunning = true
             // 读取当前状态
             isEditing = binder?.isEditing() ?: true
+            isFrontCamera = binder?.isFrontCamera() ?: false
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -70,11 +72,13 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         isRunning = isServiceRunning,
                         isEditing = isEditing,
+                        isFrontCamera = isFrontCamera,
                         cameraAlpha = cameraAlpha,
                         onStart = { startOverlay() },
                         onStop = { stopOverlay() },
                         onToggleEdit = { toggleEdit() },
-                        onAlphaChange = { setAlpha(it) }
+                        onAlphaChange = { setAlpha(it) },
+                        onSwitchCamera = { switchCamera() }
                     )
                 }
             }
@@ -158,6 +162,12 @@ class MainActivity : ComponentActivity() {
         binder?.setCameraAlpha(value)
     }
 
+    /** 切换前后置摄像头 */
+    private fun switchCamera() {
+        binder?.switchCamera()
+        isFrontCamera = !isFrontCamera
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,
@@ -174,11 +184,13 @@ class MainActivity : ComponentActivity() {
 private fun MainScreen(
     isRunning: Boolean,
     isEditing: Boolean,
+    isFrontCamera: Boolean,
     cameraAlpha: Float,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onToggleEdit: () -> Unit,
-    onAlphaChange: (Float) -> Unit
+    onAlphaChange: (Float) -> Unit,
+    onSwitchCamera: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -206,6 +218,11 @@ private fun MainScreen(
 
             Button(onClick = onToggleEdit) {
                 Text(if (isEditing) "锁定（穿透）" else "编辑（可拖动）")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = onSwitchCamera) {
+                Text(if (isFrontCamera) "切换：后置摄像头" else "切换：前置摄像头")
             }
 
             Spacer(modifier = Modifier.height(20.dp))
