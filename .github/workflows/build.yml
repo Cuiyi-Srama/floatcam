@@ -31,3 +31,4 @@ jobs:
         with:
           name: step0-apk
           path: step0/build/outputs/apk/release/*.apk
+# v2: re-register workflow
