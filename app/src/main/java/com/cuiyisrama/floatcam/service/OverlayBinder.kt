@@ -25,6 +25,14 @@ class OverlayBinder(
         service.setCameraAlpha(alpha)
     }
 
+    /** 切换前后置摄像头 */
+    fun switchCamera() {
+        service.switchCamera()
+    }
+
+    /** 当前是否前置摄像头 */
+    fun isFrontCamera(): Boolean = service.isFrontCamera()
+
     fun updateFoldingState(state: Any?) {
         service.updateFoldingState(state)
     }
