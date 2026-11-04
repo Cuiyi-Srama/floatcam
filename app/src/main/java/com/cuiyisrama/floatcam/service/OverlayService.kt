@@ -224,6 +224,17 @@ class OverlayService : Service(), LifecycleOwner {
         windowController.setCameraAlpha(alpha)
     }
 
+    /** 切换前后置摄像头（UI 按钮） */
+    fun switchCamera() {
+        val view = previewView ?: return
+        cameraController.switchCamera(view) {
+            onCameraStateChanged(true)
+        }
+    }
+
+    /** 当前是否前置摄像头 */
+    fun isFrontCamera(): Boolean = cameraController.useFrontCamera
+
     override fun onDestroy() {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         cameraController.unbindAll()
