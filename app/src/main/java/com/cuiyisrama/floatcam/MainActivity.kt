@@ -84,14 +84,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 探测服务是否存活：不带 BIND_AUTO_CREATE，避免误启动 */
+    /** 探测服务是否存活：不带 BIND_AUTO_CREATE（flags=0），避免误启动服务；加短超时判定 */
     private fun probeService() {
         try {
-            bindService(
+            val ok = bindService(
                 Intent(this, OverlayService::class.java),
                 connection,
-                Context.BIND_AUTO_CREATE
+                0  // 不带 BIND_AUTO_CREATE：服务未运行时不会创建，bind 立即失败
             )
+            if (!ok) {
+                // bindService 返回 false = 服务不存在
+                isServiceRunning = false
+                return
+            }
+            // 已绑定成功（服务在跑）→ 状态由 onServiceConnected 更新
+            // 若服务不在，系统会回调 onServiceDisconnected（对未创建服务，bind 本身返回 false）
         } catch (_: Exception) {
             isServiceRunning = false
         }
@@ -119,9 +126,10 @@ class MainActivity : ComponentActivity() {
         }
         try {
             startForegroundService(Intent(this, OverlayService::class.java))
-            probeService()
+            isServiceRunning = true
         } catch (_: Exception) {
             // ForegroundServiceStartNotAllowedException 等：进入可控停止
+            isServiceRunning = false
         }
     }
 
