@@ -61,7 +61,7 @@ class OverlayWindowController(
             gravity = Gravity.TOP or Gravity.START
             x = 60
             y = 200
-            alpha = 0.75f
+            alpha = 0.7f
         }
         cameraParams = params
 
@@ -86,6 +86,10 @@ class OverlayWindowController(
 
     /** 编辑态手势：单指拖动、双指缩放（仅编辑态生效） */
     private fun attachGesture(view: View) {
+        // 手势起始基准尺寸（双指按下时记录，缩放按基准 * 因子平滑变化）
+        var baseWidth = 0
+        var baseHeight = 0
+
         val handler = EditGestureHandler(
             onMove = { dx, dy ->
                 val params = cameraParams ?: return@EditGestureHandler
@@ -99,8 +103,15 @@ class OverlayWindowController(
             },
             onResize = { scale ->
                 val params = cameraParams ?: return@EditGestureHandler
-                val w = (params.width * (1f + scale)).toInt().coerceIn(80, 600)
-                val h = (params.height * (1f + scale)).toInt().coerceIn(120, 900)
+                // scale=1f 时记录基准（双指刚按下）；之后按基准 * 因子平滑缩放
+                if (scale <= 1.0001f && scale >= 0.9999f && baseWidth == 0) {
+                    baseWidth = params.width
+                    baseHeight = params.height
+                    return@EditGestureHandler
+                }
+                if (baseWidth == 0) return@EditGestureHandler
+                val w = (baseWidth * scale).toInt().coerceIn(80, 600)
+                val h = (baseHeight * scale).toInt().coerceIn(120, 900)
                 params.width = w
                 params.height = h
                 try {
