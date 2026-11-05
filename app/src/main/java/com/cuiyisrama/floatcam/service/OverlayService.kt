@@ -19,13 +19,16 @@ import androidx.lifecycle.LifecycleRegistry
 import com.cuiyisrama.floatcam.MainActivity
 import com.cuiyisrama.floatcam.camera.CameraController
 import com.cuiyisrama.floatcam.data.ConfigRepository
+import com.cuiyisrama.floatcam.data.WatermarkImageStore
 import com.cuiyisrama.floatcam.data.model.OverlayConfig
+import com.cuiyisrama.floatcam.overlay.WatermarkOverlayWindow
 import com.cuiyisrama.floatcam.overlay.OverlayWindowController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 
 /**
@@ -65,6 +68,8 @@ class OverlayService : Service(), LifecycleOwner {
     private lateinit var windowController: OverlayWindowController
     private lateinit var cameraController: CameraController
     private lateinit var configRepository: ConfigRepository
+    private lateinit var watermarkWindow: WatermarkOverlayWindow
+    private lateinit var watermarkStore: WatermarkImageStore
     private var previewView: PreviewView? = null
 
     /** 运行时唯一状态源（架构附录 C） */
@@ -78,9 +83,18 @@ class OverlayService : Service(), LifecycleOwner {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
-        windowController = OverlayWindowController(this)
+        windowController = OverlayWindowController(this) { x, y, w, h ->
+            // 手势结束：几何变更防抖持久化（架构附录 C）
+            updateConfig {
+                it.copy(geometry = it.geometry.copy(
+                    xRatio = x, yRatio = y, widthRatio = w, heightRatio = h
+                ))
+            }
+        }
         cameraController = CameraController(this, this)
         configRepository = ConfigRepository(this)
+        watermarkWindow = WatermarkOverlayWindow(this)
+        watermarkStore = WatermarkImageStore(this)
 
         createNotificationChannel()
         startForegroundCompat()
@@ -128,6 +142,12 @@ class OverlayService : Service(), LifecycleOwner {
         }
         // 初始镜头方向（绑定前设置，buildCameraWindow 时生效）
         cameraController.setInitialCamera(config.camera.useFrontCamera)
+        // 水印恢复（有图且配置可见时显示）
+        if (config.watermark.visible && config.watermark.imagePath != null) {
+            val bmp = runBlocking { watermarkStore.decodeImage(config.watermark.imagePath) }
+            watermarkWindow.addWatermarkWindow(bmp)
+            watermarkWindow.setAlpha(config.geometry.alpha)
+        }
     }
 
     /** 更新状态源并防抖持久化（架构附录 C） */
@@ -280,12 +300,37 @@ class OverlayService : Service(), LifecycleOwner {
     /** 当前是否前置摄像头 */
     fun isFrontCamera(): Boolean = cameraController.useFrontCamera
 
+    /** 水印开关 */
+    fun setWatermarkVisible(visible: Boolean, bitmap: android.graphics.Bitmap? = null) {
+        if (visible) {
+            watermarkWindow.addWatermarkWindow(bitmap)
+        } else {
+            watermarkWindow.removeWatermarkWindow()
+        }
+        updateConfig { it.copy(watermark = it.watermark.copy(visible = visible)) }
+    }
+
+    /** 导入水印图片并显示 */
+    fun setWatermarkImage(uri: android.net.Uri) {
+        serviceScope.launch {
+            val name = watermarkStore.importImage(uri) ?: return@launch
+            val bmp = watermarkStore.decodeImage(name)
+            Handler(Looper.getMainLooper()).post {
+                watermarkWindow.addWatermarkWindow(bmp)
+                updateConfig {
+                    it.copy(watermark = it.watermark.copy(visible = true, imagePath = name))
+                }
+            }
+        }
+    }
+
     override fun onDestroy() {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         // 最后一次立即持久化（架构 6.8 释放顺序）
         configRepository.saveImmediate(_configState.value)
         cameraController.unbindAll()
         windowController.removeAll()
+        watermarkWindow.removeWatermarkWindow()
         Log.i(TAG, "OverlayService destroyed")
         super.onDestroy()
     }
