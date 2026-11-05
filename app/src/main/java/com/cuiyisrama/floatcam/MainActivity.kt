@@ -12,6 +12,8 @@ import android.os.IBinder
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,6 +48,16 @@ class MainActivity : ComponentActivity() {
     private var isEditing by mutableStateOf(true)
     private var cameraAlpha by mutableFloatStateOf(0.54f)
     private var isFrontCamera by mutableStateOf(false)
+    private var isWatermarkVisible by mutableStateOf(false)
+
+    // 选图（PickVisualMedia，API 26 由框架处理回退）
+    private val pickWatermarkImage =
+        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) {
+                binder?.setWatermarkImage(uri)
+                isWatermarkVisible = true
+            }
+        }
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -55,6 +67,7 @@ class MainActivity : ComponentActivity() {
             // 读取当前状态
             isEditing = binder?.isEditing() ?: true
             isFrontCamera = binder?.isFrontCamera() ?: false
+            isWatermarkVisible = false // 启动时水印状态由服务配置决定，此处简化
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -78,7 +91,10 @@ class MainActivity : ComponentActivity() {
                         onStop = { stopOverlay() },
                         onToggleEdit = { toggleEdit() },
                         onAlphaChange = { setAlpha(it) },
-                        onSwitchCamera = { switchCamera() }
+                        onSwitchCamera = { switchCamera() },
+                        isWatermarkVisible = isWatermarkVisible,
+                        onToggleWatermark = { toggleWatermark() },
+                        onPickWatermark = { pickWatermarkImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
                     )
                 }
             }
@@ -164,6 +180,14 @@ class MainActivity : ComponentActivity() {
         binder?.setCameraAlpha(value)
     }
 
+    /** 水印开关 */
+    private fun toggleWatermark() {
+        val b = binder ?: return
+        val next = !isWatermarkVisible
+        b.setWatermarkVisible(next, null)
+        isWatermarkVisible = next
+    }
+
     /** 切换前后置摄像头 */
     private fun switchCamera() {
         binder?.switchCamera()
@@ -192,7 +216,10 @@ private fun MainScreen(
     onStop: () -> Unit,
     onToggleEdit: () -> Unit,
     onAlphaChange: (Float) -> Unit,
-    onSwitchCamera: () -> Unit
+    onSwitchCamera: () -> Unit,
+    isWatermarkVisible: Boolean,
+    onToggleWatermark: () -> Unit,
+    onPickWatermark: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -225,6 +252,15 @@ private fun MainScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Button(onClick = onSwitchCamera) {
                 Text(if (isFrontCamera) "切换：后置摄像头" else "切换：前置摄像头")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = onToggleWatermark) {
+                Text(if (isWatermarkVisible) "关闭水印" else "开启水印")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onPickWatermark) {
+                Text("选择水印图片")
             }
 
             Spacer(modifier = Modifier.height(20.dp))
