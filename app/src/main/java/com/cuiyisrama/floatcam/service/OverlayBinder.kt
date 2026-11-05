@@ -33,6 +33,16 @@ class OverlayBinder(
     /** 当前是否前置摄像头 */
     fun isFrontCamera(): Boolean = service.isFrontCamera()
 
+    /** 水印开关 */
+    fun setWatermarkVisible(visible: Boolean, bitmap: android.graphics.Bitmap? = null) {
+        service.setWatermarkVisible(visible, bitmap)
+    }
+
+    /** 导入水印图片 */
+    fun setWatermarkImage(uri: android.net.Uri) {
+        service.setWatermarkImage(uri)
+    }
+
     fun updateFoldingState(state: Any?) {
         service.updateFoldingState(state)
     }
