@@ -6,7 +6,9 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -50,9 +52,9 @@ class CameraController(
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     // CameraX 状态观察：ERROR_CAMERA_IN_USE
-    private val cameraStateObserver = androidx.lifecycle.Observer<androidx.camera.core.CameraInfo.CameraState> { state ->
-        if (state != null && state.type == androidx.camera.core.CameraInfo.CameraState.Type.OPENING &&
-            state.error?.code == androidx.camera.core.CameraInfo.CameraState.ERROR_CAMERA_IN_USE) {
+    private val cameraStateObserver = androidx.lifecycle.Observer<CameraState> { state ->
+        if (state != null && state.type == CameraState.Type.OPENING &&
+            state.error?.code == CameraState.ERROR_CAMERA_IN_USE) {
             Log.w(TAG, "ERROR_CAMERA_IN_USE -> hide preview")
             cameraInUse = true
             onCameraInUseChanged(true)
