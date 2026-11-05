@@ -55,9 +55,11 @@ class OverlayService : Service(), LifecycleOwner {
 
         /** 通知 Action（action 用字符串；requestCode 用 Int 且唯一） */
         const val ACTION_TOGGLE_EDIT = "floatcam.action.TOGGLE_EDIT"
+        const val ACTION_SWITCH_CAMERA = "floatcam.action.SWITCH_CAMERA"
         const val ACTION_STOP = "floatcam.action.STOP"
         const val REQ_TOGGLE_EDIT = 1001
-        const val REQ_STOP = 1002
+        const val REQ_SWITCH_CAMERA = 1002
+        const val REQ_STOP = 1003
     }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -150,6 +152,9 @@ class OverlayService : Service(), LifecycleOwner {
                     setEditing(!windowController.editing)
                     // 刷新通知文本
                     startForegroundCompat()
+                }
+                ACTION_SWITCH_CAMERA -> {
+                    switchCamera()
                 }
                 ACTION_STOP -> {
                     stopSelf()
@@ -263,6 +268,12 @@ class OverlayService : Service(), LifecycleOwner {
             Intent(this, OverlayService::class.java).setAction(ACTION_TOGGLE_EDIT),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        // 切换镜头
+        val switchCam = PendingIntent.getService(
+            this, REQ_SWITCH_CAMERA,
+            Intent(this, OverlayService::class.java).setAction(ACTION_SWITCH_CAMERA),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         // 退出
         val stop = PendingIntent.getService(
             this, REQ_STOP,
@@ -271,6 +282,7 @@ class OverlayService : Service(), LifecycleOwner {
         )
 
         val label = if (windowController.editing) "锁定" else "编辑"
+        val camLabel = if (cameraController.useFrontCamera) "后置" else "前置"
 
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("浮窗相机")
@@ -279,6 +291,7 @@ class OverlayService : Service(), LifecycleOwner {
             .setContentIntent(pi)
             .setOngoing(true)
             .addAction(0, label, toggleEdit)
+            .addAction(0, camLabel, switchCam)
             .addAction(0, "退出", stop)
             .build()
     }
@@ -294,7 +307,10 @@ class OverlayService : Service(), LifecycleOwner {
     fun isCameraActive(): Boolean = cameraActive
 
     fun updateFoldingState(state: Any?) {
-        // TODO(批次 9): FoldingFeature 保守夹取，与 Insets 机制分离
+        // 架构 5.3：FoldingFeature 保守夹取（半开时把窗口限制在铰链一侧），不承诺精确避让
+        // 折叠屏非目标场景，此处仅做空实现防 NPE，真机联调时补充夹取逻辑
+        if (state == null) return
+        // TODO(真机联调): 根据 FoldingFeature bounds/state 保守夹取窗口位置
     }
 
     /** 相机开关（CameraController 回调） */
