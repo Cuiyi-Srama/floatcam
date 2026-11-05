@@ -1,29 +1,52 @@
 # FloatCam 浮窗相机
 
-悬浮摄像头与水印图层 —— 游戏直播/录屏场景的摄像头悬浮窗工具。
+游戏直播/录屏时，把摄像头画面和水印悬浮在屏幕上的小工具。摄像头和水印是独立的两个窗口，可以分别开关、分别拖动缩放，互不影响。
 
-摄像头与水印是两个**独立 WindowManager 窗口**，可并行、分别开关。App 只负责在屏幕上显示可配置的悬浮窗，推流、编码、屏幕捕获交给直播软件，直播软件通过系统屏幕捕获自然读到本 App 的悬浮窗。
+直播软件通过系统屏幕捕获自然能读到这两个悬浮窗，FloatCam 自己不做推流、不做编码。
 
-## 功能特性
+## 能干什么
 
-- 📷 **摄像头悬浮窗**：CameraX 预览，悬浮在任意应用之上
-- 🖼️ **水印悬浮窗**：透明 PNG 水印图层，独立窗口独立开关
-- 🎚️ **独立控制**：摄像头、水印可分别开/关，互不联动
-- ✋ **两态运行**：编辑态（拖动/缩放/调透明度）+ 锁定态（穿透，实测为准）
-- 🔄 **动态前台服务类型**：有相机用 `camera`，仅水印切 `specialUse`（API 34+），双隐停止
-- 🔒 **隐私安全**：不设 FLAG_SECURE、不申请 MediaProjection、不依赖无障碍、不静默自启
+- 摄像头悬浮窗：前置/后置可切，可拖动、双指缩放
+- 水印图层：选一张透明 PNG 挂上去，独立开关
+- 两个窗口互相独立：开摄像头不开水印，或者反过来，都行
+- 编辑/锁定两态：编辑时随便拖，锁定时窗口不响应触摸
+- 设置全部自动保存：位置、大小、透明度、镜头方向，重启不丢
 
-## 技术栈
+## 怎么用
 
-| 领域 | 选型 |
-| --- | --- |
-| UI | 单 Activity + Jetpack Compose |
-| 相机 | CameraX + PreviewView |
-| 服务 | LifecycleService + 前台服务（动态类型 camera \| specialUse） |
-| 持久化 | DataStore（Preferences，800ms 防抖 + 5s 最大防抖窗口） |
-| 图片选择 | Photo Picker（PickVisualMedia，API 26 回退） |
-| 窗口 | WindowManager + TYPE_APPLICATION_OVERLAY |
-| 最低版本 | API 26 |
+1. 装 APK，授权悬浮窗、相机、通知三个权限
+2. 打开 App，点「启动服务」
+3. 悬浮窗出现，拖动到想要的位置，调透明度
+4. 直播软件照常录屏，悬浮窗自然入画
+
+## 关于「穿透」这件事，说清楚
+
+锁定态窗口本来是想「不挡手指」——点悬浮窗覆盖的区域，触摸能穿透到下面的游戏。实测结论（vivo V2425A / Android 17）：
+
+- alpha 0.54 刚好穿透，0.55 刚好不穿透
+- 这是系统不可信触摸机制决定的，不是加个 flag 就能绕过
+- 不同机型阈值不同，0.54 只代表这台 vivo
+
+所以别指望它在你手机上也是 0.54。App 里留了透明度滑条，现场调到能穿透又不至于太淡为止。
+
+## 技术
+
+- Kotlin + Jetpack Compose，单 Activity
+- CameraX 预览，前台服务动态类型（有相机用 camera，仅水印用 specialUse）
+- DataStore 持久化，800ms 防抖 + 5s 兜底落盘
+- 最低 Android 8.0（API 26）
+
+## 目前状态
+
+v0.8.0。核心链路都通了：双窗口、手势、持久化、相机占用自动恢复、锁屏自动隐藏恢复。
+
+## 不做的事
+
+- 不做推流/编码/录屏
+- 不申请 MediaProjection
+- 不依赖无障碍服务
+- 不设 FLAG_SECURE
+- 不搞悬浮球（直播会入画）
 
 ## 构建
 
@@ -31,32 +54,4 @@
 ./gradlew :app:assembleRelease
 ```
 
-产物：`app/build/outputs/apk/release/`。CI 通过 GitHub Actions 自动编译，Artifact 见 Actions 页面。
-
-## 目录结构
-
-```
-app/                        # 正式工程（Kotlin + Compose）
-  src/main/java/com/cuiyisrama/floatcam/
-    MainActivity.kt         # 服务探测、权限、Compose 首页
-    service/                # OverlayService + OverlayBinder（唯一状态源）
-step0/                      # Step 0 验证探针（纯 Java，测完即弃）
-```
-
-## 版本
-
-- v0.1.0：正式工程骨架（Compose 首页 + 前台服务动态类型切换 + 权限链路），CI 编译通过
-- Step 0 验证（探针）：在目标 ROM 实测不可信触摸阻断、FGS 类型切换、锁屏恢复，结论决定后续功能验收标准
-
-## 目标设备
-
-- 主目标机：vivo V2425A / Android 17 (SDK 37)
-- 兼容：Android 12+（不可信触摸机制），API 26+ 可安装
-
-## 许可
-
-MIT License
-
----
-
-架构蓝图与 Step 0 实测矩阵见项目文档（`docs/` 规划中）。
+CI 用 GitHub Actions，push 到 main 自动出包。
