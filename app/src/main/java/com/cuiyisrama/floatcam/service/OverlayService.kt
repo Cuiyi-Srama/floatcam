@@ -5,8 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.app.KeyguardManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -72,6 +76,17 @@ class OverlayService : Service(), LifecycleOwner {
     private lateinit var watermarkStore: WatermarkImageStore
     private var previewView: PreviewView? = null
 
+    // 锁屏监听（架构 6.7：SCREEN_OFF 移除窗口 + unbind；解锁重建 + rebind）
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                onScreenOff()
+            } else if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                onScreenOn()
+            }
+        }
+    }
+
     /** 运行时唯一状态源（架构附录 C） */
     private val _configState = MutableStateFlow(OverlayConfig())
     val configState: StateFlow<OverlayConfig> = _configState.asStateFlow()
@@ -91,13 +106,29 @@ class OverlayService : Service(), LifecycleOwner {
                 ))
             }
         }
-        cameraController = CameraController(this, this)
+        cameraController = CameraController(this, this) { inUse ->
+            // 相机被抢占：隐藏预览窗口 + 提示；恢复可用：重建窗口（架构 6.6）
+            if (inUse) {
+                windowController.removeCameraWindow()
+                onCameraStateChanged(false)
+            } else {
+                // 恢复：重建摄像头窗口并重绑
+                buildCameraWindow()
+            }
+        }
         configRepository = ConfigRepository(this)
         watermarkWindow = WatermarkOverlayWindow(this)
         watermarkStore = WatermarkImageStore(this)
 
         createNotificationChannel()
         startForegroundCompat()
+
+        // 锁屏/解锁监听
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        registerReceiver(screenOffReceiver, filter)
 
         // 异步读配置（架构 6.2 第 4 步）：IO 读 DataStore，主线程应用配置+建窗
         serviceScope.launch {
@@ -324,6 +355,37 @@ class OverlayService : Service(), LifecycleOwner {
         }
     }
 
+    /** 锁屏：移除窗口 + unbind 相机（架构 6.7，不承诺锁屏可见） */
+    private fun onScreenOff() {
+        Log.i(TAG, "screen off -> remove windows + unbind camera")
+        cameraController.unbindAll()
+        windowController.removeAll()
+        watermarkWindow.removeWatermarkWindow()
+        onCameraStateChanged(false)
+    }
+
+    /** 解锁：重建窗口 + rebind 相机（架构 6.7） */
+    private fun onScreenOn() {
+        Log.i(TAG, "screen on -> rebuild windows")
+        val config = _configState.value
+        // 重建摄像头窗口
+        buildCameraWindow()
+        // 重建水印（若配置可见）
+        if (config.watermark.visible && config.watermark.imagePath != null) {
+            val bmp = runBlocking { watermarkStore.decodeImage(config.watermark.imagePath) }
+            watermarkWindow.addWatermarkWindow(bmp)
+            watermarkWindow.setAlpha(config.geometry.alpha)
+        }
+        // 恢复编辑态
+        if (!config.editing) windowController.setEditing(false)
+    }
+
+    /** 任务移除：释放并停止（架构 6.2 第 5 步） */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.i(TAG, "task removed -> stop")
+        stopSelf()
+    }
+
     override fun onDestroy() {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         // 最后一次立即持久化（架构 6.8 释放顺序）
@@ -331,6 +393,11 @@ class OverlayService : Service(), LifecycleOwner {
         cameraController.unbindAll()
         windowController.removeAll()
         watermarkWindow.removeWatermarkWindow()
+        try {
+            unregisterReceiver(screenOffReceiver)
+        } catch (e: Exception) {
+            Log.w(TAG, "unregisterReceiver error", e)
+        }
         Log.i(TAG, "OverlayService destroyed")
         super.onDestroy()
     }
