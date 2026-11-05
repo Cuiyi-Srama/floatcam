@@ -13,6 +13,10 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import androidx.window.layout.WindowInfoTracker
+import androidx.window.layout.WindowLayoutInfo
+import kotlinx.coroutines.launch
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -79,6 +83,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 折叠屏监听（架构 5.3：MainActivity 同步 FoldingFeature 给 Service）
+        observeFoldingFeature()
+
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -98,6 +105,17 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    /** 监听折叠状态并经 Binder 同步给 Service（架构 5.3） */
+    private fun observeFoldingFeature() {
+        lifecycleScope.launch {
+            WindowInfoTracker.getOrCreate(this@MainActivity).windowLayoutInfo(this@MainActivity)
+                .collect { layoutInfo: WindowLayoutInfo ->
+                    val folding = layoutInfo.displayFeatures.firstOrNull()
+                    binder?.updateFoldingState(folding)
+                }
         }
     }
 
