@@ -8,7 +8,9 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.Lifecycle
@@ -83,12 +85,14 @@ class OverlayService : Service(), LifecycleOwner {
         createNotificationChannel()
         startForegroundCompat()
 
-        // 异步读配置（架构 6.2 第 4 步），应用几何/alpha/镜头后建窗
+        // 异步读配置（架构 6.2 第 4 步）：IO 读 DataStore，主线程应用配置+建窗
         serviceScope.launch {
             val config = configRepository.load()
             _configState.value = config
-            applyConfig(config)
-            buildCameraWindow()
+            Handler(Looper.getMainLooper()).post {
+                applyConfig(config)
+                buildCameraWindow()
+            }
         }
         Log.i(TAG, "OverlayService created")
     }
