@@ -16,7 +16,15 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import com.cuiyisrama.floatcam.MainActivity
 import com.cuiyisrama.floatcam.camera.CameraController
+import com.cuiyisrama.floatcam.data.ConfigRepository
+import com.cuiyisrama.floatcam.data.model.OverlayConfig
 import com.cuiyisrama.floatcam.overlay.OverlayWindowController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * 前台服务，持有运行时唯一状态源（对应架构文档 6.3 动态类型切换）。
@@ -54,7 +62,13 @@ class OverlayService : Service(), LifecycleOwner {
 
     private lateinit var windowController: OverlayWindowController
     private lateinit var cameraController: CameraController
+    private lateinit var configRepository: ConfigRepository
     private var previewView: PreviewView? = null
+
+    /** 运行时唯一状态源（架构附录 C） */
+    private val _configState = MutableStateFlow(OverlayConfig())
+    val configState: StateFlow<OverlayConfig> = _configState.asStateFlow()
+    private val serviceScope = CoroutineScope(Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -64,11 +78,18 @@ class OverlayService : Service(), LifecycleOwner {
 
         windowController = OverlayWindowController(this)
         cameraController = CameraController(this, this)
+        configRepository = ConfigRepository(this)
 
         createNotificationChannel()
         startForegroundCompat()
 
-        buildCameraWindow()
+        // 异步读配置（架构 6.2 第 4 步），应用几何/alpha/镜头后建窗
+        serviceScope.launch {
+            val config = configRepository.load()
+            _configState.value = config
+            applyConfig(config)
+            buildCameraWindow()
+        }
         Log.i(TAG, "OverlayService created")
     }
 
@@ -93,6 +114,23 @@ class OverlayService : Service(), LifecycleOwner {
         val b = OverlayBinder(this)
         binder = b
         return b
+    }
+
+    /** 应用配置到窗口（几何/alpha/镜头方向/编辑态） */
+    private fun applyConfig(config: OverlayConfig) {
+        windowController.setCameraAlpha(config.geometry.alpha)
+        if (!config.editing) {
+            windowController.setEditing(false)
+        }
+        // 初始镜头方向（绑定前设置，buildCameraWindow 时生效）
+        cameraController.setInitialCamera(config.camera.useFrontCamera)
+    }
+
+    /** 更新状态源并防抖持久化（架构附录 C） */
+    private fun updateConfig(transform: (OverlayConfig) -> OverlayConfig) {
+        val next = transform(_configState.value)
+        _configState.value = next
+        configRepository.save(next)
     }
 
     /** 构建摄像头悬浮窗并绑定相机（架构文档 6.2 第 4 步） */
@@ -214,6 +252,7 @@ class OverlayService : Service(), LifecycleOwner {
     /** 切换编辑/锁定态（通知 Action / UI 调用） */
     fun setEditing(enabled: Boolean) {
         windowController.setEditing(enabled)
+        updateConfig { it.copy(editing = enabled) }
     }
 
     /** 当前是否编辑态 */
@@ -222,6 +261,7 @@ class OverlayService : Service(), LifecycleOwner {
     /** 设置摄像头窗口透明度（UI 滑条） */
     fun setCameraAlpha(alpha: Float) {
         windowController.setCameraAlpha(alpha)
+        updateConfig { it.copy(geometry = it.geometry.copy(alpha = alpha)) }
     }
 
     /** 切换前后置摄像头（UI 按钮） */
@@ -230,6 +270,7 @@ class OverlayService : Service(), LifecycleOwner {
         cameraController.switchCamera(view) {
             onCameraStateChanged(true)
         }
+        updateConfig { it.copy(camera = it.camera.copy(useFrontCamera = cameraController.useFrontCamera)) }
     }
 
     /** 当前是否前置摄像头 */
@@ -237,6 +278,8 @@ class OverlayService : Service(), LifecycleOwner {
 
     override fun onDestroy() {
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+        // 最后一次立即持久化（架构 6.8 释放顺序）
+        configRepository.saveImmediate(_configState.value)
         cameraController.unbindAll()
         windowController.removeAll()
         Log.i(TAG, "OverlayService destroyed")
