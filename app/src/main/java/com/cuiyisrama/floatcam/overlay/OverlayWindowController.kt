@@ -17,7 +17,9 @@ import androidx.camera.view.PreviewView
  * - Locked：FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCHABLE，目标穿透（实际以 Step 0-A 组 B 实测为准）
  */
 class OverlayWindowController(
-    private val context: Context
+    private val context: Context,
+    /** 手势结束回调：把最新几何（比例模型）通知上层持久化 */
+    private val onGeometryChanged: ((xRatio: Float, yRatio: Float, wRatio: Float, hRatio: Float) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "FloatCam.Window"
@@ -121,7 +123,20 @@ class OverlayWindowController(
                 }
             },
             onGestureEnd = {
-                // TODO(批次 6): 手势结束触发 DataStore 800ms 防抖持久化
+                // 手势结束：按屏幕尺寸换算比例，通知上层持久化（架构附录 C）
+                onGeometryChanged?.let { cb ->
+                    val params = cameraParams ?: return@EditGestureHandler
+                    val display = context.resources.displayMetrics
+                    val screenW = display.widthPixels.coerceAtLeast(1)
+                    val screenH = display.heightPixels.coerceAtLeast(1)
+                    val short = minOf(screenW, screenH).coerceAtLeast(1)
+                    cb(
+                        (params.x.toFloat() / screenW).coerceIn(0f, 1f),
+                        (params.y.toFloat() / screenH).coerceIn(0f, 1f),
+                        (params.width.toFloat() / short).coerceIn(0.05f, 1f),
+                        (params.height.toFloat() / short).coerceIn(0.05f, 1f)
+                    )
+                }
             }
         )
         gestureHandler = handler
