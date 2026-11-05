@@ -36,6 +36,11 @@ class CameraController(
 
     private val executor: Executor = ContextCompat.getMainExecutor(context)
 
+    /** 设置初始镜头方向（读配置后、绑定前调用） */
+    fun setInitialCamera(front: Boolean) {
+        useFrontCamera = front
+    }
+
     /** 当前是否已绑定相机 */
     fun isBound(): Boolean = bound
 
