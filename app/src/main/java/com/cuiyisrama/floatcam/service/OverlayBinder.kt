@@ -43,7 +43,10 @@ class OverlayBinder(
         service.setWatermarkImage(uri)
     }
 
-    fun updateFoldingState(state: Any?) {
+    /** 水印当前是否可见 */
+    fun isWatermarkVisible(): Boolean = service.isWatermarkVisible()
+
+    fun updateFoldingState(state: androidx.window.layout.FoldingFeature?) {
         service.updateFoldingState(state)
     }
 }
