@@ -14,6 +14,8 @@ import kotlin.math.max
 class EditGestureHandler(
     private val onMove: (dx: Int, dy: Int) -> Unit,
     private val onResize: (scale: Float) -> Unit,
+    /** 双指按下时通知 controller 记录基准尺寸（#9 修复：不再依赖浮点阈值识别） */
+    private val onScaleStart: () -> Unit = {},
     private val onGestureEnd: () -> Unit
 ) : View.OnTouchListener {
 
@@ -57,7 +59,7 @@ class EditGestureHandler(
                     dragging = false
                     scaling = true
                     lastSpan = spacing(event)
-                    onResize(1f) // 通知 controller 记录手势起始基准尺寸
+                    onScaleStart() // 直接通知 controller 记录基准尺寸
                 }
                 return true
             }
@@ -85,6 +87,14 @@ class EditGestureHandler(
                     }
                     lastX = event.rawX
                     lastY = event.rawY
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                // 多指减少（三指变两指）：重设跨度基准，避免跳变（#9 附带）
+                if (scaling && event.pointerCount >= 2) {
+                    lastSpan = spacing(event)
                 }
                 return true
             }
