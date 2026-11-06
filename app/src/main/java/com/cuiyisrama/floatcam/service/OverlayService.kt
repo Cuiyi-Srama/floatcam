@@ -32,7 +32,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 
 /**
@@ -121,6 +120,7 @@ class OverlayService : Service(), LifecycleOwner {
         configRepository = ConfigRepository(this)
         watermarkWindow = WatermarkOverlayWindow(this)
         watermarkStore = WatermarkImageStore(this)
+        windowController.attachWatermarkWindow(watermarkWindow)
 
         createNotificationChannel()
         startForegroundCompat()
@@ -172,17 +172,36 @@ class OverlayService : Service(), LifecycleOwner {
 
     /** 应用配置到窗口（几何/alpha/镜头方向/编辑态） */
     private fun applyConfig(config: OverlayConfig) {
+        // #13: 通知权限被拒且锁定态 → 强制编辑态并持久化（架构 9：通知栏路径失效，UI 内必须可控制）
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED &&
+            !config.editing
+        ) {
+            _configState.value = config.copy(editing = true)
+            configRepository.saveImmediate(_configState.value)
+        }
+
         windowController.setCameraAlpha(config.geometry.alpha)
-        if (!config.editing) {
+        if (!_configState.value.editing) {
             windowController.setEditing(false)
         }
         // 初始镜头方向（绑定前设置，buildCameraWindow 时生效）
         cameraController.setInitialCamera(config.camera.useFrontCamera)
-        // 水印恢复（有图且配置可见时显示）
+        // 水印恢复（异步解码，避免主线程 ANR——#3）
         if (config.watermark.visible && config.watermark.imagePath != null) {
-            val bmp = runBlocking { watermarkStore.decodeImage(config.watermark.imagePath) }
-            watermarkWindow.addWatermarkWindow(bmp)
-            watermarkWindow.setAlpha(config.geometry.alpha)
+            restoreWatermarkAsync(config.watermark.imagePath, config.geometry.alpha)
+        }
+    }
+
+    /** 异步解码水印并显示（#3：不阻塞主线程） */
+    private fun restoreWatermarkAsync(imagePath: String, alpha: Float) {
+        serviceScope.launch {
+            val bmp = watermarkStore.decodeImage(imagePath)
+            Handler(Looper.getMainLooper()).post {
+                watermarkWindow.addWatermarkWindow(bmp)
+                watermarkWindow.setAlpha(alpha)
+            }
         }
     }
 
@@ -200,7 +219,8 @@ class OverlayService : Service(), LifecycleOwner {
         }
         previewView = view
 
-        val added = windowController.addCameraWindow(view)
+        // 配置驱动建窗（#4：几何来自 StateFlow）
+        val added = windowController.addCameraWindow(view, _configState.value.geometry)
         if (!added) {
             Log.e(TAG, "camera window add failed -> controlled stop")
             stopSelf()
@@ -306,11 +326,10 @@ class OverlayService : Service(), LifecycleOwner {
 
     fun isCameraActive(): Boolean = cameraActive
 
-    fun updateFoldingState(state: Any?) {
-        // 架构 5.3：FoldingFeature 保守夹取（半开时把窗口限制在铰链一侧），不承诺精确避让
-        // 折叠屏非目标场景，此处仅做空实现防 NPE，真机联调时补充夹取逻辑
+    /** 架构 5.3：FoldingFeature 保守夹取（#14：具体类型，不再 Any?） */
+    fun updateFoldingState(state: androidx.window.layout.FoldingFeature?) {
         if (state == null) return
-        // TODO(真机联调): 根据 FoldingFeature bounds/state 保守夹取窗口位置
+        // TODO(真机联调): 根据 state.bounds / state.state 保守夹取窗口位置
     }
 
     /** 相机开关（CameraController 回调） */
@@ -346,6 +365,9 @@ class OverlayService : Service(), LifecycleOwner {
 
     /** 当前是否前置摄像头 */
     fun isFrontCamera(): Boolean = cameraController.useFrontCamera
+
+    /** 水印当前是否可见（#11：UI 同步用） */
+    fun isWatermarkVisible(): Boolean = _configState.value.watermark.visible
 
     /** 水印开关 */
     fun setWatermarkVisible(visible: Boolean, bitmap: android.graphics.Bitmap? = null) {
@@ -386,11 +408,9 @@ class OverlayService : Service(), LifecycleOwner {
         val config = _configState.value
         // 重建摄像头窗口
         buildCameraWindow()
-        // 重建水印（若配置可见）
+        // 重建水印（若配置可见，异步解码）
         if (config.watermark.visible && config.watermark.imagePath != null) {
-            val bmp = runBlocking { watermarkStore.decodeImage(config.watermark.imagePath) }
-            watermarkWindow.addWatermarkWindow(bmp)
-            watermarkWindow.setAlpha(config.geometry.alpha)
+            restoreWatermarkAsync(config.watermark.imagePath, config.geometry.alpha)
         }
         // 恢复编辑态
         if (!config.editing) windowController.setEditing(false)
