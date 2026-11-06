@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
             // 读取当前状态
             isEditing = binder?.isEditing() ?: true
             isFrontCamera = binder?.isFrontCamera() ?: false
-            isWatermarkVisible = false // 启动时水印状态由服务配置决定，此处简化
+            isWatermarkVisible = binder?.isWatermarkVisible() ?: false
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -184,9 +184,21 @@ class MainActivity : ComponentActivity() {
         isServiceRunning = false
     }
 
+    /** #15: 服务绑定未就绪提示 */
+    private fun toastServiceNotReady() {
+        android.widget.Toast.makeText(
+            this, "服务启动中，请稍候…",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+    }
+
     /** 编辑/锁定切换（App 内控制，不依赖悬浮球） */
     private fun toggleEdit() {
-        val b = binder ?: return
+        val b = binder
+        if (b == null) {
+            toastServiceNotReady()
+            return
+        }
         val next = !isEditing
         b.setEditing(next)
         isEditing = next
@@ -195,12 +207,18 @@ class MainActivity : ComponentActivity() {
     /** 透明度滑条（App 内控制） */
     private fun setAlpha(value: Float) {
         cameraAlpha = value
-        binder?.setCameraAlpha(value)
+        val b = binder
+        if (b == null) return // 未绑定：UI 仍更新本地值，绑定后 onServiceConnected 同步
+        b.setCameraAlpha(value)
     }
 
     /** 水印开关 */
     private fun toggleWatermark() {
-        val b = binder ?: return
+        val b = binder
+        if (b == null) {
+            toastServiceNotReady()
+            return
+        }
         val next = !isWatermarkVisible
         b.setWatermarkVisible(next, null)
         isWatermarkVisible = next
@@ -208,7 +226,12 @@ class MainActivity : ComponentActivity() {
 
     /** 切换前后置摄像头 */
     private fun switchCamera() {
-        binder?.switchCamera()
+        val b = binder
+        if (b == null) {
+            toastServiceNotReady()
+            return
+        }
+        b.switchCamera()
         isFrontCamera = !isFrontCamera
     }
 
@@ -218,8 +241,19 @@ class MainActivity : ComponentActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // #10 修复：只有权限全部授予才继续启动；拒绝则停止，避免无限循环
         if (requestCode == 100 || requestCode == 101) {
-            startOverlay()
+            val granted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (granted) {
+                startOverlay()
+            } else {
+                isServiceRunning = false
+                // 权限被拒：不再自动请求，用户可手动去设置页
+                android.widget.Toast.makeText(
+                    this, "相机/通知权限被拒绝，无法启动服务",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
 }
