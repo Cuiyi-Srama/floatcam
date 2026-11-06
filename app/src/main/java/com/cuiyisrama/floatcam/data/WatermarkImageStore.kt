@@ -55,13 +55,13 @@ class WatermarkImageStore(private val context: Context) {
             val file = File(dir, fileName)
             if (!file.exists()) return@withContext null
 
-            // 采样解码：先读边界，再按目标尺寸采样
+            // 采样解码：先读边界，再按目标尺寸采样（#7：屏幕长边 0.6 倍，非仅宽度）
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.absolutePath, bounds)
-            val target = maxOf(
-                context.resources.displayMetrics.widthPixels,
-                (context.resources.displayMetrics.widthPixels * 0.6f).toInt()
-            ).coerceAtMost(MAX_DECODE_PX)
+            val screenW = context.resources.displayMetrics.widthPixels
+            val screenH = context.resources.displayMetrics.heightPixels
+            val longEdge = maxOf(screenW, screenH)
+            val target = (longEdge * 0.6f).toInt().coerceAtMost(MAX_DECODE_PX)
 
             var sample = 1
             while (bounds.outWidth / sample > target || bounds.outHeight / sample > target) {
@@ -71,24 +71,39 @@ class WatermarkImageStore(private val context: Context) {
             val opts = BitmapFactory.Options().apply { inSampleSize = sample }
             var bmp = BitmapFactory.decodeFile(file.absolutePath, opts) ?: return@withContext null
 
-            // EXIF 归一化（旋转修正）
+            // EXIF 归一化（#8：完整处理 8 方向，含翻转/转置）
             val exif = ExifInterface(file.absolutePath)
             val orientation = exif.getAttributeInt(
                 ExifInterface.TAG_ORIENTATION,
                 ExifInterface.ORIENTATION_NORMAL
             )
-            val rotation = when (orientation) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                else -> 0f
+            val matrix = Matrix()
+            when (orientation) {
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL ->
+                    matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_ROTATE_180 ->
+                    matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL ->
+                    matrix.postScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    matrix.postRotate(90f)
+                    matrix.postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_ROTATE_90 ->
+                    matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    matrix.postRotate(270f)
+                    matrix.postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_ROTATE_270 ->
+                    matrix.postRotate(270f)
+                else -> {}
             }
-            if (rotation != 0f) {
-                val matrix = Matrix().apply { postRotate(rotation) }
-                val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-                if (rotated != bmp) {
+            if (!matrix.isIdentity) {
+                val transformed = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                if (transformed != bmp) {
                     bmp.recycle()
-                    bmp = rotated
+                    bmp = transformed
                 }
             }
             bmp
