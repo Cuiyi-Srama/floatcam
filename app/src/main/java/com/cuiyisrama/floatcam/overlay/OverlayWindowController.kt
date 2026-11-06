@@ -5,8 +5,12 @@ import android.graphics.PixelFormat
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.graphics.Insets
 import android.view.WindowManager
 import androidx.camera.view.PreviewView
+import com.cuiyisrama.floatcam.data.model.WindowGeometry
+import com.cuiyisrama.floatcam.util.RectPx
+import com.cuiyisrama.floatcam.util.toPx
 
 /**
  * 统一管理摄像头与（未来）水印两个悬浮窗口。
@@ -33,6 +37,12 @@ class OverlayWindowController(
     private var cameraParams: WindowManager.LayoutParams? = null
     private var cameraPreviewView: PreviewView? = null
     private var gestureHandler: EditGestureHandler? = null
+    private var watermarkWindow: WatermarkOverlayWindow? = null
+
+    /** 关联水印窗口（供 removeAll 统一清理） */
+    fun attachWatermarkWindow(watermark: WatermarkOverlayWindow) {
+        watermarkWindow = watermark
+    }
 
     /** 摄像头窗口是否可见 */
     var isCameraVisible: Boolean = false
@@ -45,27 +55,30 @@ class OverlayWindowController(
     /**
      * 添加摄像头悬浮窗口。窗口内（含透明像素区域）拦截触摸，是矩形窗口固有行为。
      */
-    fun addCameraWindow(previewView: PreviewView): Boolean {
+    fun addCameraWindow(previewView: PreviewView, geometry: WindowGeometry = WindowGeometry()): Boolean {
         if (cameraWindow != null) {
             Log.w(TAG, "camera window already exists")
             return false
         }
         cameraPreviewView = previewView
 
+        // 配置驱动：用归一化几何 + Insets 夹取计算像素（架构 5）
+        val rect = computeGeometry(geometry)
         val params = WindowManager.LayoutParams(
-            CAMERA_WIDTH_PX,
-            CAMERA_HEIGHT_PX,
+            rect.w,
+            rect.h,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 60
-            y = 200
-            alpha = 0.54f
+            x = rect.x
+            y = rect.y
+            alpha = geometry.alpha.coerceIn(0.3f, 1f)
         }
         cameraParams = params
+        currentGeometry = geometry
 
         try {
             windowManager.addView(previewView, params)
@@ -83,6 +96,56 @@ class OverlayWindowController(
             gestureHandler = null
             isCameraVisible = false
             return false
+        }
+    }
+
+    /** 当前生效几何（配置驱动） */
+    private var currentGeometry: WindowGeometry = WindowGeometry()
+
+    /** 用屏幕尺寸 + Insets 夹取计算窗口像素（架构 5.2 toPx） */
+    private fun computeGeometry(geometry: WindowGeometry): RectPx {
+        val display = context.resources.displayMetrics
+        val screenW = display.widthPixels.coerceAtLeast(1)
+        val screenH = display.heightPixels.coerceAtLeast(1)
+        // Insets：状态栏/导航栏/挖孔
+        var insetsL = 0; var insetsT = 0; var insetsR = 0; var insetsB = 0
+        try {
+            val metrics = WindowManager.LayoutParams().apply {
+                // 用 WindowManager 当前窗口度量
+            }
+            @Suppress("DEPRECATION")
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val currentInsets = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                wm.currentWindowMetrics.windowInsets
+            } else null
+            if (currentInsets != null) {
+                val bars = currentInsets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.systemBars() or
+                        android.view.WindowInsets.Type.displayCutout()
+                )
+                insetsL = bars.left; insetsT = bars.top; insetsR = bars.right; insetsB = bars.bottom
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "insets read failed, fallback 0", e)
+        }
+        return geometry.toPx(screenW, screenH, insetsL, insetsT, insetsR, insetsB)
+    }
+
+    /** 更新窗口几何（旋转/配置变化/恢复时按比例重算，架构 5.1） */
+    fun updateCameraGeometry(geometry: WindowGeometry) {
+        val window = cameraWindow ?: return
+        val params = cameraParams ?: return
+        val rect = computeGeometry(geometry)
+        params.x = rect.x
+        params.y = rect.y
+        params.width = rect.w
+        params.height = rect.h
+        params.alpha = geometry.alpha.coerceIn(0.3f, 1f)
+        currentGeometry = geometry
+        try {
+            windowManager.updateViewLayout(window, params)
+        } catch (e: Exception) {
+            Log.e(TAG, "updateCameraGeometry failed", e)
         }
     }
 
@@ -105,12 +168,6 @@ class OverlayWindowController(
             },
             onResize = { scale ->
                 val params = cameraParams ?: return@EditGestureHandler
-                // scale=1f 时记录基准（双指刚按下）；之后按基准 * 因子平滑缩放
-                if (scale <= 1.0001f && scale >= 0.9999f && baseWidth == 0) {
-                    baseWidth = params.width
-                    baseHeight = params.height
-                    return@EditGestureHandler
-                }
                 if (baseWidth == 0) return@EditGestureHandler
                 val w = (baseWidth * scale).toInt().coerceIn(80, 600)
                 val h = (baseHeight * scale).toInt().coerceIn(120, 900)
@@ -120,6 +177,14 @@ class OverlayWindowController(
                     windowManager.updateViewLayout(view, params)
                 } catch (e: Exception) {
                     Log.e(TAG, "gesture resize failed", e)
+                }
+            },
+            // #9 修复：双指按下直接记录基准，不再依赖 scale==1f 浮点阈值
+            onScaleStart = {
+                val params = cameraParams
+                if (params != null) {
+                    baseWidth = params.width
+                    baseHeight = params.height
                 }
             },
             onGestureEnd = {
@@ -204,9 +269,9 @@ class OverlayWindowController(
         isCameraVisible = false
     }
 
-    /** 移除全部窗口 */
+    /** 移除全部窗口（含摄像头 + 水印，幂等） */
     fun removeAll() {
         removeCameraWindow()
-        // TODO(批次 7): removeWatermarkWindow()
+        watermarkWindow?.removeWatermarkWindow()
     }
 }
